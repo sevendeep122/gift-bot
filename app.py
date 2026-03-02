@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 """
-Боевой бот для подарков - Версия для Render
-Запуск с Flask-заглушкой для порта
+Боевой бот для подарков - Версия для Render с WEBHOOK
 """
 
-from flask import Flask
+from flask import Flask, request
 from threading import Thread
 import logging
 import json
@@ -12,13 +11,13 @@ import os
 import asyncio
 import random
 from datetime import datetime
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # ======================= НАСТРОЙКИ =======================
-# Берём токен из переменных окружения (на Render зададим позже)
-BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8704362929:AAHYWTXS1EZnxyU0Vhv__rhzt3m0TVJRqpI")
+BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8634197474:AAHcZ0LpaY08dLJCZvW1GB6NEwJbCPWsLuc")
 YOUR_CHAT_ID = 8585177726  # твой ID
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://gift-bot-live.onrender.com")  # URL твоего бота на Render
 
 # Настройка логирования
 logging.basicConfig(
@@ -30,21 +29,29 @@ logger = logging.getLogger(__name__)
 # Файл для хранения пользователей
 USER_STATES_FILE = "users.json"
 
-# ======================= Flask-заглушка для Render =======================
+# ======================= Flask приложение для webhook =======================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 Gift Bot is running!"
+    return "Bot is running!"
 
 @app.route('/health')
 def health():
     return "OK"
 
-# ======================= ВСЯ ТВОЯ ЛОГИКА БОТА =======================
-# (все функции из bot.py - start, handle_message, transfer_all_assets и т.д.)
-# Вставляй их сюда полностью, я сократил для читаемости
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Принимает обновления от Telegram"""
+    try:
+        update = Update.de_json(request.get_json(force=True), bot)
+        application.update_queue.put_nowait(update)
+        return "OK", 200
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return "Error", 500
 
+# ======================= ЛОГИКА БОТА =======================
 def load_users():
     if os.path.exists(USER_STATES_FILE):
         try:
@@ -119,23 +126,55 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("👋 Напиши /start")
 
-# ======================= ЗАПУСК БОТА В ПОТОКЕ =======================
-def run_bot():
-    """Запускает Telegram бота в отдельном потоке"""
-    try:
-        application = Application.builder().token(BOT_TOKEN).build()
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        
-        logger.info("🚀 Бот запускается...")
-        application.run_polling()
-    except Exception as e:
-        logger.error(f"Ошибка бота: {e}")
+# ======================= НАСТРОЙКА WEBHOOK =======================
+async def setup_webhook(app_instance):
+    """Устанавливает webhook при запуске"""
+    webhook_url = f"{RENDER_URL}/webhook"
+    await app_instance.bot.set_webhook(url=webhook_url)
+    logger.info(f"Webhook установлен на {webhook_url}")
 
-# Запускаем бота в фоне
-Thread(target=run_bot).start()
+# Создаём приложение Telegram
+application = Application.builder().token(BOT_TOKEN).build()
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# ======================= ЗАПУСК Flask =======================
-if __name__ == "__main__":
+# Глобальная переменная для bot (нужна во Flask)
+bot = Bot(token=BOT_TOKEN)
+
+# ======================= ЗАПУСК =======================
+def run_flask():
+    """Запускает Flask в отдельном потоке"""
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    print("=" * 50)
+    print("🤖 GIFT BOT - БОЕВАЯ ВЕРСИЯ С WEBHOOK")
+    print("=" * 50)
+    print(f"\n📁 Файл пользователей: {USER_STATES_FILE}")
+    print(f"🌐 Webhook URL: {RENDER_URL}/webhook")
+    print("🚀 Бот запускается...\n")
+    
+    # Запускаем Flask в фоне
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # Устанавливаем webhook и запускаем приложение
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    async def main():
+        await setup_webhook(application)
+        await application.initialize()
+        await application.start()
+        logger.info("Бот готов к работе через webhook")
+        
+        # Держим приложение запущенным
+        while True:
+            await asyncio.sleep(60)
+    
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        loop.run_until_complete(application.stop())
